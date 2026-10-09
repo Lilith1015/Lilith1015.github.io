@@ -1,0 +1,253 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>叠叠乐 · 跳跳乐</title>
+<style>
+*{box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#87CEEB;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',Roboto,sans-serif}
+#gameCanvas{display:block;width:100vw;height:100vh;touch-action:manipulation;cursor:pointer}
+.close-btn{position:fixed;top:12px;right:12px;width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.92);border:none;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:24px;color:#333;z-index:100;font-weight:700}
+.audio-fab{position:fixed;top:70px;right:12px;width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.92);border:none;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:24px;z-index:100}
+.audio-popup{position:fixed;top:130px;right:12px;width:220px;background:rgba(255,255,255,.97);border-radius:16px;padding:12px 14px;box-shadow:0 6px 16px rgba(0,0,0,.3);z-index:101;display:none;flex-direction:column;gap:8px;border:1px solid #ddd}
+.audio-popup.show{display:flex}
+.audio-popup .row{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:700;color:#2c5f8a}
+.audio-popup .row label{width:46px;flex-shrink:0;font-size:.75rem}
+.audio-popup input[type=range]{flex:1;-webkit-appearance:none;height:5px;border-radius:6px;background:#b8d4e8;outline:none}
+.audio-popup input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#5ba3d9;border:2px solid #fff}
+.audio-popup .val{width:40px;text-align:right;font-size:.66rem;color:#888}
+.audio-popup .divider{height:1px;background:#ddd;margin:4px 0}
+.audio-popup .section-title{font-size:.7rem;color:#5ba3d9;font-weight:800}
+.audio-popup .mute-btn{background:#5ba3d9;color:#fff;border:none;border-radius:20px;padding:5px 0;font-size:.72rem;font-weight:700;cursor:pointer;width:100%}
+#startTip{position:fixed;left:50%;top:78%;transform:translateX(-50%);background:rgba(0,0,0,0.45);color:#fff;font-size:24px;font-weight:800;padding:12px 32px;border-radius:30px;z-index:150;pointer-events:none}
+</style>
+</head>
+<body>
+<button class="close-btn" id="closeBtn">✕</button>
+<button class="audio-fab" id="audioFab">⚙️</button>
+<div class="audio-popup" id="audioPopup">
+<div class="section-title">🔊 音频</div>
+<div class="row"><label>🎵 音乐</label><input type="range" id="bgmVolume" min="0" max="100" value="30"><span class="val" id="bgmVolVal">30%</span></div>
+<div class="row"><label>🔊 音效</label><input type="range" id="sfxVolume" min="0" max="100" value="60"><span class="val" id="sfxVolVal">60%</span></div>
+<button class="mute-btn" id="muteBtn">🔇 静音全部</button>
+<div class="divider"></div>
+<div class="section-title">🍮 布丁速度</div>
+<div class="row"><label>⚡ 速度</label><input type="range" id="speedSlider" min="10" max="200" value="100"><span class="val" id="speedVal">100%</span></div>
+</div>
+<canvas id="gameCanvas"></canvas>
+<div id="startTip">点击屏幕开始</div>
+<script>
+(function(){
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+const CW=window.innerWidth, CH=window.innerHeight;
+canvas.width=CW; canvas.height=CH;
+window.addEventListener('resize',()=>{location.reload()});
+
+let blocks=[],score=0,gameOver=false,started=false;
+let BASE_BLOCK_HEIGHT=Math.max(50,CH*0.09);
+let INIT_BLOCK_WIDTH=Math.min(CW*0.55,200);
+let MIN_BLOCK_WIDTH=Math.min(CW*0.08,40);
+let currentBlock=null,animationId=null,isMoving=false;
+let speedMultiplier=1.0;
+let jumpState={active:false,y:0,velocity:0,gravity:.85};
+let cameraY=0,targetCameraY=0;
+let scorePopups=[],dustParticles=[],time=0;
+let GROUND_Y=CH*0.82;
+
+let clouds=[
+{x:CW*0.15, y:CH*0.40, size:1.0, speed:.06},
+{x:CW*0.65, y:CH*0.42, size:.8, speed:.04},
+{x:CW*0.40, y:CH*0.48, size:1.1, speed:.05},
+{x:CW*0.85, y:CH*0.55, size:.7, speed:.07},
+{x:CW*0.25, y:CH*0.62, size:.9, speed:.05},
+{x:CW*0.70, y:CH*0.70, size:.85, speed:.06},
+{x:CW*0.15, y:CH*0.78, size:.8, speed:.05},
+{x:CW*0.60, y:CH*0.95, size:.9, speed:.06},
+{x:CW*0.40, y:CH*1.15, size:.85, speed:.05},
+{x:CW*0.80, y:CH*1.40, size:.7, speed:.07},
+{x:CW*0.30, y:CH*1.70, size:.85, speed:.05},
+{x:CW*0.70, y:CH*2.00, size:.8, speed:.06}];
+let birds=[
+{x:CW*0.25, y:CH*0.55, speed:-.55, phase:0, size:.9},
+{x:CW*0.80, y:CH*1.05, speed:-.45, phase:2, size:.7},
+{x:CW*0.40, y:CH*1.85, speed:-.5, phase:4, size:.8}];
+
+let puddingConfig={bodyColor:'#f7d9aa',caramelColor:'#c97b3f',creamColor:'#fff8e7',cherryColor:'#e63946',sprinkleColor:'#ffb3c6',name:'焦糖布丁'};
+
+let audioCtx=null,masterGain=null,bgmGain=null,sfxGain=null,bgmTimer=null,bgmPlaying=false,isMuted=false,bgmVolume=1.0,sfxVolume=2.0;
+function initAudio(){if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();masterGain=audioCtx.createGain();masterGain.gain.value=1;masterGain.connect(audioCtx.destination);bgmGain=audioCtx.createGain();bgmGain.gain.value=bgmVolume;bgmGain.connect(masterGain);sfxGain=audioCtx.createGain();sfxGain.gain.value=sfxVolume;sfxGain.connect(masterGain)}catch(e){}}if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume()}
+function playDuang(p,d,v,dn){if(!audioCtx||isMuted)return;try{const n=audioCtx.currentTime,o=audioCtx.createOscillator();o.type='sine';const bf=dn?180:260;o.frequency.setValueAtTime(bf*p*1.6,n);o.frequency.exponentialRampToValueAtTime(bf*p*.55,n+d*.7);const g=audioCtx.createGain();g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(v,n+.008);g.gain.exponentialRampToValueAtTime(.001,n+d);o.connect(g);g.connect(sfxGain);o.start(n);o.stop(n+d+.05)}catch(e){}}
+function playDropSound(){playDuang(.85,.32,.7,true);setTimeout(()=>playDuang(1.5,.15,.35,false),50)}
+function playJumpSound(){playDuang(1.6,.22,.55,false)}
+function playGameOverSound(){playDuang(.5,.8,.5,true)}
+function startBgm(){if(bgmPlaying||!audioCtx)return;bgmPlaying=true;const loop=()=>{if(!bgmPlaying||!audioCtx)return;const now=audioCtx.currentTime+.1;[523.25,659.25,783.99,659.25,440,523.25,659.25,523.25].forEach((f,i)=>{const o=audioCtx.createOscillator();o.type='sine';o.frequency.value=f;const g=audioCtx.createGain();g.gain.setValueAtTime(0,now+i*.55);g.gain.linearRampToValueAtTime(.12,now+i*.55+.03);g.gain.exponentialRampToValueAtTime(.001,now+i*.55+.5);o.connect(g);g.connect(bgmGain);o.start(now+i*.55);o.stop(now+i*.55+.55)});bgmTimer=setTimeout(loop,4400)};loop()}
+function stopBgm(){bgmPlaying=false;if(bgmTimer){clearTimeout(bgmTimer);bgmTimer=null}}
+function ensureBgmPlaying(){if(!bgmPlaying&&audioCtx)startBgm()}
+
+function drawWorld(){const gy=GROUND_Y-cameraY;
+if(gy>0){const sg=ctx.createLinearGradient(0,0,0,Math.max(1,gy));sg.addColorStop(0,'#87CEEB');sg.addColorStop(.7,'#B0E0F6');sg.addColorStop(1,'#D6EEFF');ctx.fillStyle=sg;ctx.fillRect(0,0,CW,gy)}
+if(gy<CH){const gg=ctx.createLinearGradient(0,gy,0,CH);gg.addColorStop(0,'#A8E06B');gg.addColorStop(1,'#7BC44E');ctx.fillStyle=gg;ctx.fillRect(0,gy,CW,CH-gy)}
+if(score>=4){const sy=CH*0.13-cameraY;if(sy>-100&&sy<CH+100){ctx.beginPath();ctx.arc(CW-80,sy,36,0,Math.PI*2);ctx.fillStyle='#FFF4B0';ctx.fill()}}
+clouds.forEach(c=>{const sy=c.y-cameraY;if(sy>-120&&sy<CH*0.55)drawCloud(c.x,sy,c.size);c.x+=c.speed;if(c.x>CW+100)c.x=-100});
+birds.forEach(b=>{const sy=b.y-cameraY;if(sy>-60&&sy<CH+60)drawBird(b.x,sy,b.size,b.phase);b.x+=b.speed;b.phase+=.08;if(b.x<-50)b.x=CW+50})}
+function drawCloud(x,y,s){ctx.fillStyle='#FFF';ctx.beginPath();ctx.arc(x,y,18*s,0,7);ctx.arc(x+20*s,y-10*s,22*s,0,7);ctx.arc(x+46*s,y-4*s,18*s,0,7);ctx.arc(x+64*s,y+4*s,13*s,0,7);ctx.arc(x+22*s,y+8*s,15*s,0,7);ctx.fill()}
+function drawBird(x,y,s,p){const wu=Math.sin(p)*6*s;ctx.strokeStyle='#4a6a8a';ctx.lineWidth=2.8*s;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x-12*s,y-wu);ctx.quadraticCurveTo(x-6*s,y-2*s,x,y);ctx.quadraticCurveTo(x+6*s,y-2*s,x+12*s,y-wu);ctx.stroke()}
+function drawPudding(x,y,w,h,c){const r=Math.min(16,w*.2,h*.35);ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=c.bodyColor;ctx.fill();const ch=Math.max(11,h*.28);ctx.beginPath();ctx.roundRect(x,y,w,ch,[r,r,0,0]);ctx.fillStyle=c.caramelColor;ctx.fill();const cy=y+ch-3,cc=Math.max(3,Math.floor(w/24)),cr=Math.max(5,Math.min(10,w/17));ctx.beginPath();for(let i=0;i<cc;i++){const cx=x+(i+.5)*(w/cc);ctx.moveTo(cx+cr,cy);ctx.arc(cx,cy,cr,0,7)}ctx.fillStyle=c.creamColor;ctx.fill();ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.strokeStyle='rgba(120,70,30,.3)';ctx.lineWidth=2.5;ctx.stroke()}
+
+// ★ 人物图片（已换成新链接）
+const charImg = new Image();
+charImg.crossOrigin = "anonymous";
+charImg.src = "https://i.postimg.cc/3r0Kg1pg/wei-xin-tu-pian-20261008223105-2-1123-removebg-preview-(1).png";
+let charImgLoaded = false;
+let charCanvas = null;
+charImg.onload = () => {
+  const c = document.createElement('canvas');
+  c.width = charImg.width;
+  c.height = charImg.height;
+  const cc = c.getContext('2d');
+  cc.drawImage(charImg, 0, 0);
+  const imgData = cc.getImageData(0, 0, c.width, c.height);
+  const d = imgData.data;
+  const W = c.width, H = c.height;
+  const visited = new Uint8Array(W * H);
+  const stack = [];
+  for (let x = 0; x < W; x++) { stack.push(x, 0); stack.push(x, H-1); }
+  for (let y = 0; y < H; y++) { stack.push(0, y); stack.push(W-1, y); }
+  while (stack.length > 0) {
+    const py = stack.pop();
+    const px = stack.pop();
+    if (px < 0 || px >= W || py < 0 || py >= H) continue;
+    const idx = py * W + px;
+    if (visited[idx]) continue;
+    visited[idx] = 1;
+    const di = idx * 4;
+    const r = d[di], g = d[di+1], b = d[di+2], a = d[di+3];
+    const isLight = a < 50 || (r >= 235 && g >= 235 && b >= 235);
+    if (!isLight) continue;
+    d[di+3] = 0;
+    stack.push(px+1, py); stack.push(px-1, py);
+    stack.push(px, py+1); stack.push(px, py-1);
+  }
+  cc.putImageData(imgData, 0, 0);
+  charCanvas = c;
+  charImgLoaded = true;
+};
+
+function drawChar(cx, bt, bw) {
+  if (!charImgLoaded || !charCanvas) return;
+  const scale = Math.max(1.0, Math.min(2.4, bw / 65));
+  const imgH = 60 * scale;
+  const imgW = imgH * (charCanvas.width / charCanvas.height);
+  const footY = bt + imgH * 0.1;
+  ctx.save();
+  ctx.globalAlpha = 1.0;
+  ctx.drawImage(charCanvas, cx - imgW / 2, footY - imgH, imgW, imgH);
+  ctx.restore();
+}
+
+const BC=['#f7d9aa','#c8e6b5','#ffc9d4','#c69c7b','#ffd97a','#c9b6e4','#ffb8b8','#a8d8ea','#f5c6a0','#d4b8e0'];
+function rbc(){return BC[Math.floor(Math.random()*BC.length)]}
+function addPopup(x,y,t){scorePopups.push({x,y,text:t,life:1,vy:-1.5})}
+function addDust(x,y,n){for(let i=0;i<n;i++)dustParticles.push({x:x+(Math.random()-.5)*30,y:y,vx:(Math.random()-.5)*3,vy:-Math.random()*2,size:2+Math.random()*3,life:1})}
+function resetGame(){
+gameOver=false;isMoving=false;blocks=[];score=0;
+cameraY=0;targetCameraY=0;scorePopups=[];dustParticles=[];time=0;
+jumpState={active:false,y:0,velocity:0,gravity:.85};
+const bw=INIT_BLOCK_WIDTH,bx=(CW-bw)/2,by=GROUND_Y-BASE_BLOCK_HEIGHT;
+blocks.push({x:bx,y:by,width:bw,height:BASE_BLOCK_HEIGHT,bodyColor:puddingConfig.bodyColor,caramelColor:puddingConfig.caramelColor,creamColor:puddingConfig.creamColor,cherryColor:puddingConfig.cherryColor,sprinkleColor:puddingConfig.sprinkleColor});
+spawn();ensureBgmPlaying();
+if(animationId)cancelAnimationFrame(animationId);animate();
+}
+function spawn(){
+if(gameOver)return;
+const last=blocks[blocks.length-1];
+const bw=last.width,bh=BASE_BLOCK_HEIGHT;
+const dir=Math.random()>.5?1:-1;
+const sx=dir===1?-bw/2:CW-bw/2;
+const fc=rbc();
+const sp=Math.min(6,1.4+score*.3)*speedMultiplier;
+currentBlock={x:sx,y:last.y-bh-100,width:bw,height:bh,bodyColor:fc,caramelColor:puddingConfig.caramelColor,creamColor:puddingConfig.creamColor,cherryColor:puddingConfig.cherryColor,sprinkleColor:puddingConfig.sprinkleColor,direction:dir,speed:sp};
+isMoving=true;
+}
+function place(){
+if(!currentBlock||!isMoving||gameOver)return;
+const last=blocks[blocks.length-1],cur=currentBlock;
+const l=Math.max(cur.x,last.x),r=Math.min(cur.x+cur.width,last.x+last.width);
+const ow=r-l;
+if(ow<=0){gameOver=true;isMoving=false;currentBlock=null;playGameOverSound();stopBgm();
+const hi=parseInt(localStorage.getItem('bestScore')||'0');if(score>hi)localStorage.setItem('bestScore',score);return}
+const nx=l,nw=ow,ny=last.y-BASE_BLOCK_HEIGHT;
+blocks.push({x:nx,y:ny,width:nw,height:BASE_BLOCK_HEIGHT,bodyColor:cur.bodyColor,caramelColor:cur.caramelColor,creamColor:cur.creamColor,cherryColor:cur.cherryColor,sprinkleColor:cur.sprinkleColor});
+score++;playDropSound();
+addDust(nx+nw/2,ny+BASE_BLOCK_HEIGHT,3);
+addPopup(nx+nw/2,ny-10,'+1');
+jumpState.active=true;jumpState.y=0;jumpState.velocity=-9;
+setTimeout(playJumpSound,90);
+currentBlock=null;isMoving=false;
+const t=blocks[blocks.length-1];const d=t.y-CH*0.4;if(d<targetCameraY)targetCameraY=d;
+if(nw<MIN_BLOCK_WIDTH||blocks.length>=14||ny<-CH*6){gameOver=true;isMoving=false;
+const hi=parseInt(localStorage.getItem('bestScore')||'0');if(score>hi)localStorage.setItem('bestScore',score);
+setTimeout(()=>{playGameOverSound();stopBgm()},200);return}
+spawn();
+}
+function draw(){
+drawWorld();
+ctx.save();ctx.translate(0,-cameraY);
+blocks.forEach(b=>drawPudding(b.x,b.y,b.width,b.height,b));
+if(currentBlock)drawPudding(currentBlock.x,currentBlock.y,currentBlock.width,currentBlock.height,currentBlock);
+if(blocks.length>0&&!gameOver){const t=blocks[blocks.length-1];drawChar(t.x+t.width/2,t.y+jumpState.y,t.width)}
+ctx.restore();
+const hi=parseInt(localStorage.getItem('bestScore')||'0');
+ctx.fillStyle='rgba(0,0,0,0.4)';ctx.beginPath();ctx.roundRect(12,12,180,40,20);ctx.fill();
+ctx.font='bold 22px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+ctx.fillStyle='#FFD700';ctx.fillText('🏆',22,32);
+ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.fillText('历史记录 '+hi,58,32);
+ctx.fillStyle='rgba(0,0,0,0.4)';ctx.beginPath();ctx.roundRect(12,60,140,40,20);ctx.fill();
+ctx.font='bold 24px sans-serif';ctx.fillStyle='#FFD700';ctx.fillText('🍰',22,80);
+ctx.fillStyle='#fff';ctx.font='bold 22px sans-serif';ctx.fillText(score,58,80);
+ctx.fillStyle='rgba(255,255,255,0.95)';ctx.strokeStyle='rgba(180,180,180,0.7)';ctx.lineWidth=5;
+ctx.font='bold 72px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+ctx.strokeText(score,CW/2,CH*0.13);ctx.fillText(score,CW/2,CH*0.13);
+if(gameOver){ctx.fillStyle='rgba(40,80,120,.6)';ctx.fillRect(0,0,CW,CH);ctx.fillStyle='#fff';ctx.font='bold 36px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('🍮 叠叠乐倒了',CW/2,CH/2-30);ctx.font='bold 24px sans-serif';ctx.fillStyle='#FFD700';ctx.fillText('点击屏幕重新开始',CW/2,CH/2+40)}
+}
+CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){if(w<2*r)r=w/2;if(h<2*r)r=h/2;this.moveTo(x+r,y);this.lineTo(x+w-r,y);this.quadraticCurveTo(x+w,y,x+w,y+r);this.lineTo(x+w,y+h-r);this.quadraticCurveTo(x+w,y+h,x+w-r,y+h);this.lineTo(x+r,y+h);this.quadraticCurveTo(x,y+h,x,y+h-r);this.lineTo(x,y+r);this.quadraticCurveTo(x,y,x+r,y);this.closePath();return this};
+
+function animate(){
+  if(animationId)cancelAnimationFrame(animationId);
+  animationId=requestAnimationFrame(animate);
+  time++;cameraY+=(targetCameraY-cameraY)*.05;
+  if(jumpState.active){jumpState.velocity+=jumpState.gravity;jumpState.y+=jumpState.velocity;if(jumpState.y>=0&&jumpState.velocity>0){jumpState.y=0;jumpState.velocity=0;jumpState.active=false}}
+  if(!gameOver&&currentBlock&&isMoving){currentBlock.x+=currentBlock.direction*currentBlock.speed;
+  if(currentBlock.direction===1&&currentBlock.x+currentBlock.width>CW){currentBlock.direction=-1;currentBlock.x=CW-currentBlock.width}
+  else if(currentBlock.direction===-1&&currentBlock.x<0){currentBlock.direction=1;currentBlock.x=0}}
+  scorePopups.forEach(p=>{p.y+=p.vy;p.life-=.02});scorePopups=scorePopups.filter(p=>p.life>0);
+  dustParticles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.15;p.life-=.03});dustParticles=dustParticles.filter(p=>p.life>0);
+  draw();
+}
+function handleClick(e){
+  e.preventDefault();initAudio();
+  if(!started){started=true;document.getElementById('startTip').style.display='none';if(audioCtx&&!bgmPlaying)startBgm()}
+  if(gameOver){resetGame();return}
+  if(isMoving&&currentBlock)place();
+}
+function init(){
+const pop=document.getElementById('audioPopup');
+document.getElementById('audioFab').addEventListener('click',e=>{e.stopPropagation();pop.classList.toggle('show');initAudio()});
+document.getElementById('closeBtn').addEventListener('click',e=>{e.stopPropagation();if(confirm('确定要退出吗？'))window.close()});
+document.addEventListener('click',e=>{if(!pop.contains(e.target)&&e.target!==document.getElementById('audioFab'))pop.classList.remove('show')});
+document.getElementById('bgmVolume').addEventListener('input',e=>{bgmVolume=e.target.value/100*2.5;document.getElementById('bgmVolVal').textContent=e.target.value+'%'});
+document.getElementById('sfxVolume').addEventListener('input',e=>{sfxVolume=e.target.value/100*3.5;document.getElementById('sfxVolVal').textContent=e.target.value+'%'});
+document.getElementById('speedSlider').addEventListener('input',e=>{speedMultiplier=e.target.value/100;document.getElementById('speedVal').textContent=e.target.value+'%';if(currentBlock&&isMoving)currentBlock.speed=Math.min(6,1.4+score*.3)*speedMultiplier});
+document.getElementById('muteBtn').addEventListener('click',()=>{isMuted=!isMuted;if(isMuted){if(masterGain)masterGain.gain.value=0;document.getElementById('muteBtn').textContent='🔊 取消静音'}else{if(masterGain)masterGain.gain.value=1;document.getElementById('muteBtn').textContent='🔇 静音全部';initAudio();if(!bgmPlaying)startBgm()}});
+resetGame();
+canvas.addEventListener('click',handleClick);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();handleClick(e)},{passive:false});
+initAudio();
+}
+window.addEventListener('load',init);
+})();
+</script>
+</body>
+</html>
